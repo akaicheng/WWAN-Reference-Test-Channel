@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WWAN RTC Tool v2.0</title>
+    <style>
+        :root {
+            --primary-lte: #2563eb; --primary-nr: #7c3aed; --primary-mmw: #db2777;
+            --bg: #f8fafc; --card: #ffffff; --border: #e2e8f0; --text: #1e293b;
+        }
+        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 20px; display: flex; justify-content: center; }
+        .container { background: var(--card); width: 100%; max-width: 950px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); border: 1px solid var(--border); overflow: hidden; }
+        .header { background: linear-gradient(135deg, var(--primary-lte), var(--primary-nr)); color: white; padding: 25px; text-align: center; }
+        .content { padding: 25px; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 25px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; font-size: 0.85rem; color: #64748b; }
+        select { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; background: white; cursor: pointer; }
+        .rtc-table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; }
+        .rtc-table th { background: #f1f5f9; text-align: left; padding: 12px; border-bottom: 2px solid var(--border); font-size: 0.85rem; color: #475569; }
+        .rtc-table td { padding: 14px 12px; border-bottom: 1px solid var(--border); font-size: 1rem; }
+        .val-ch { font-weight: bold; color: #334155; font-family: 'Courier New', monospace; }
+        .val-freq-dl { font-weight: bold; color: var(--primary-lte); }
+        .val-freq-ul { font-weight: bold; color: #059669; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+<div class="container" id="mainApp">
+    <div class="header">
+        <h2 style="margin:0">WWAN Reference Test Channel</h2>
+        <p style="margin:5px 0 0; font-size:0.9rem; opacity:0.95">Version 2.0 | joshchengkj@google.com</p>
+    </div>
+    <div class="content">
+        <div class="form-row">
+            <div>
+                <label>Technology (RAT)</label>
+                <select id="ratSelect" onchange="onRatChange()">
+                    <option value="">-- Select RAT --</option>
+                    <option value="GSM">GSM (2G)</option>
+                    <option value="WCDMA">WCDMA (3G)</option>
+                    <option value="LTE">LTE (4G)</option>
+                    <option value="NR5G_SUB6">5G NR Sub-6</option>
+                    <option value="NR5G_MMW">5G NR mmWave</option>
+                </select>
+            </div>
+            <div>
+                <label>Band</label>
+                <select id="bandSelect" onchange="onBandChange()" disabled></select>
+            </div>
+            <div id="bwContainer" class="hidden">
+                <label>Bandwidth</label>
+                <select id="bwSelect" onchange="displayResult()"></select>
+            </div>
+        </div>
+        <div id="resultArea"></div>
+    </div>
+</div>
+
+<script>
+    function nrArfcnToFreq(n) {
+        if (n < 600000) return n * 0.005;
+        if (n <= 2016666) return 3000 + 0.015 * (n - 600000);
+        return 24250 + 0.060 * (n - 2016667);
+    }
+    function nrFreqToArfcn(f) {
+        if (f < 3000) return Math.round(f / 0.005);
+        if (f < 24250) return Math.round((f - 3000) / 0.015) + 600000;
+        return Math.round((f - 24250) / 0.060) + 2016667;
+    }
+
+    const TECH_SPEC = {
+        "GSM": { "G850": {dl: 869.2, ul: 824.2, off: 128}, "G900": {dl: 935, ul: 890, off: 0}, "G1800": {dl: 1805.2, ul: 1710.2, off: 512}, "G1900": {dl: 1930.2, ul: 1850.2, off: 512} },
+        "WCDMA": { "B1": {ndl:9612, nul:9262, dl:2110, ul:1920}, "B2": {ndl:9262, nul:9262, dl:1930, ul:1850, s:-80}, "B4": {ndl:1312, nul:1312, dl:2110, ul:1710}, "B5": {ndl:4132, nul:4132, dl:869, ul:824}, "B6": {ndl:4162, nul:4162, dl:875, ul:830}, "B8": {ndl:2712, nul:2712, dl:925, ul:880}, "B19": {ndl:312, nul:312, dl:875, ul:830} },
+        "LTE": { 
+            "B1": {ndl:0, nul:18000, dl:2110, s:-190}, "B2": {ndl:600, nul:18600, dl:1930, s:-80}, "B3": {ndl:1200, nul:19200, dl:1805, s:-95}, "B4": {ndl:1950, nul:19950, dl:2110, s:-400}, "B5": {ndl:2400, nul:20400, dl:869, s:-45}, "B7": {ndl:2750, nul:20750, dl:2620, s:-120}, "B8": {ndl:3450, nul:21450, dl:925, s:-45}, "B12": {ndl:5010, nul:23010, dl:729, s:-30}, "B13": {ndl:5180, nul:23180, dl:746, s:31}, "B14": {ndl:5280, nul:23280, dl:758, s:30}, "B20": {ndl:6150, nul:24150, dl:791, s:41}, "B25": {ndl:8040, nul:26040, dl:1930, s:-80}, "B26": {ndl:8690, nul:26690, dl:859, s:-45}, "B28": {ndl:9210, nul:27210, dl:758, s:-55}, "B66": {ndl:66436, nul:131972, dl:2110, s:-400}, "B71": {ndl:68586, nul:132622, dl:617, s:46}, "B41": {ndl:39650, nul:39650, dl:2496, s:0}, "B48": {ndl:55240, nul:55240, dl:3550, s:0}
+        },
+        "NR5G_SUB6": { 
+            "n1":{s:-190},"n2":{s:-80},"n3":{s:-95},"n5":{s:-45},"n7":{s:-120},"n8":{s:-45},"n12":{s:-30},"n13":{s:31},"n14":{s:31},"n20":{s:41},"n24":{s:102},"n25":{s:-80},"n26":{s:-45},"n28":{s:-55},"n28A":{s:-55},"n28B":{s:-55},"n29":{s:0},"n30":{s:-80},"n34":{s:0},"n38":{s:0},"n40":{s:0},"n41":{s:0},"n48":{s:0},"n66":{s:-400},"n70":{s:-300},"n71":{s:46},"n74":{s:-400},"n75":{s:0},"n76":{s:0},"n77":{s:0},"n78":{s:0},"n79":{s:0},"n255":{s:101.5},"n256":{s:-190} 
+        },
+        "NR5G_MMW": { "n257": {s:0}, "n258": {s:0}, "n260": {s:0}, "n261": {s:0} }
+    };
+
+    const RF_CHANNELS_MAP = {
+		"GSM": {
+            "G900": {"L": 975, "M": 38, "H": 124}, "G1900": {"L": 512, "M": 661, "H": 810}, "G1800": {"L": 512, "M": 699, "H": 885}, "G850": {"L": 128, "M": 190, "H": 251}
+        },
+        "WCDMA": {
+            "B1": {"L": 9612, "M": 9750, "H": 9888}, 
+			"B2": {"L": 9262, "M": 9400, "H": 9538}, 
+			"B4": {"L": 1312, "M": 1412, "H": 1513}, 
+			"B5": {"L": 4132, "M": 4183, "H": 4233}, 
+			"B6": {"L": 4162, "M": 4175, "H": 4188}, 
+			"B8": {"L": 2712, "M": 2788, "H": 2863}, 
+			"B19": {"L": 312, "M": 338, "H": 363}
+			},
+        "LTE": {
+            "B1": {"L": 50, "M": 300, "H": 550}, 
+			"B2": {"L": 650, "M": 900, "H": 1150}, 
+			"B3": {"L": 1250, "M": 1575, "H": 1900}, 
+			"B4": {"L": 2001, "M": 2175, "H": 2350}, 
+			"B5": {"L": 2450, "M": 2525, "H": 2600}, 
+			"B7": {"L": 2800, "M": 3100, "H": 3400}, 
+			"B8": {"L": 3500, "M": 3625, "H": 3750}, 
+			"B11": {"L": 4800, "M": 4850, "H": 4900}, 
+			"B12": {"L": 5060, "M": 5095, "H": 5129}, 
+			"B13": {"M": 5230}, "B14": {"M": 5330}, 
+			"B17": {"L": 5780, "M": 5790, "H": 5800}, 
+			"B18": {"L": 5900, "M": 5925, "H": 5950}, 
+			"B19": {"L": 6050, "M": 6075, "H": 6100}, 
+			"B20": {"L": 6200, "M": 6300, "H": 6400}, 
+			"B21": {"L": 6500, "M": 6525, "H": 6550}, 
+			"B25": {"L": 8091, "M": 8365, "H": 8640}, 
+			"B26": {"L": 8801, "M": 8865, "H": 8989}, 
+			"B28": {"L": 9261, "M": 9360, "H": 9410}, 
+			"B66": {"L": 66488, "M": 66786, "H": 67086}, 
+			"B41": {"L": 39700, "M": 40620, "H": 41539}, 
+			"B48": {"L": 55290, "M": 55990, "H": 56690}
+			},
+        "NR5G_SUB6": {
+        "n1": {
+			"5MHz":{"L":422500,"M":428000,"H":433500},
+			"10MHz":{"L":423000,"M":428000,"H":433000},
+			"15MHz":{"L":423500,"M":428000,"H":432500},
+			"20MHz":{"L":424000,"M":428000,"H":432000},
+			"25MHz":{"L":424500,"M":428000,"H":431500},
+			"30MHz":{"L":425000,"M":428000,"H":431000},
+			"40MHz":{"L":426000,"M":428000,"H":430000},
+			"45MHz":{"L":426500,"M":428000,"H":429500},
+			"50MHz":{"L":427000,"M":428000,"H":429000}
+			},
+        "n2": {
+			"5MHz":{"L":386500,"M":392000,"H":397500},
+			"10MHz":{"L":387000,"M":392000,"H":397000},
+			"15MHz":{"L":387500,"M":392000,"H":396500},
+			"20MHz":{"L":388000,"M":392000,"H":396000},
+			"25MHz":{"L":388500,"M":392000,"H":395500},
+			"30MHz":{"L":389000,"M":392000,"H":395000},
+			"35MHz":{"L":389500,"M":392000,"H":394500},
+			"40MHz":{"L":390000,"M":392000,"H":394000}
+			},
+        "n3": {
+			"5MHz":{"L":361500,"M":368500,"H":375500},
+			"10MHz":{"L":362000,"M":368500,"H":375000},
+			"15MHz":{"L":362500,"M":368500,"H":374500},
+			"20MHz":{"L":363000,"M":368500,"H":374000},
+			"25MHz":{"L":363500,"M":368500,"H":373500},
+			"30MHz":{"L":364000,"M":368500,"H":373000},
+			"35MHz":{"L":364500,"M":368500,"H":372500},
+			"40MHz":{"L":365000,"M":368500,"H":372000},
+			"45MHz":{"L":365500,"M":368500,"H":371500},
+			"50MHz":{"L":366000,"M":368500,"H":371000}
+			},
+        "n5": {
+			"10MHz":{"L":174800,"M":176300,"H":177800},
+			"15MHz":{"L":175300,"M":176300,"H":177300},
+			"20MHz":{"L":175800,"M":176300,"H":176800}
+			},
+        "n7": {
+			"10MHz":{"L":525000,"M":531000,"H":537000},
+			"15MHz":{"L":525500,"M":531000,"H":536500},
+			"20MHz":{"L":526000,"M":531000,"H":536000}
+			},
+        "n8": {
+			"10MHz":{"L":186000,"M":188500,"H":191000},
+			"15MHz":{"L":186500,"M":188500,"H":190500},
+			"20MHz":{"L":187000,"M":188500,"H":190000}
+			},
+        "n12": {
+			"10MHz":{"L":146800,"M":147500,"H":148200},
+			"15MHz":{"L":147300,"M":147500,"H":147700}
+			},
+        "n13": {
+			"5MHz":{"L":149700,"M":150200,"H":150700},
+			"10MHz":{"M":150200}
+			},
+        "n14": {
+			"10MHz":{"M":152600}
+			},
+        "n20": {
+			"10MHz":{"L":159200,"M":161200,"H":163200},
+			"20MHz":{"L":160200,"M":161200,"H":162200}
+			},
+        "n24": {
+			"10MHz":{"L":306000,"M":308400,"H":310800}
+			},
+        "n26": {
+			"5MHz":{"L":172300,"M":175300,"H":178300},
+			"10MHz":{"L":172800,"M":175300,"H":177800},
+			"20MHz":{"L":173800,"M":175300,"H":176800},
+			"30MHz":{"L":174800,"M":175300,"H":175800}
+			},
+		"n29": {
+			"10MHz":{"L": 144400, "M": 144500, "H": 144600}
+			},
+        "n25": {
+			"5MHz":{"L":386500,"M":392500,"H":398500},
+			"10MHz":{"L":387000,"M":392500,"H":398000},
+			"15MHz":{"L":387500,"M":392500,"H":397500},
+			"20MHz":{"L":388000,"M":392500,"H":397000},
+			"25MHz":{"L":388500,"M":392500,"H":396500},
+			"30MHz":{"L":389000,"M":392500,"H":396000},
+			"35MHz":{"L":389500,"M":392500,"H":395500},
+			"40MHz":{"L":390000,"M":392500,"H":395000}
+			},
+        "n28": {
+			"5MHz": {"L": 152200, "M": 156600, "H": 160200},
+			"10MHz": {"L": 152800, "M": 155600, "H": 159600, "HCA1": 156600},
+			"15MHz": {"L": 153500, "M": 155500, "H": 159100},
+			"20MHz": {"L": 154200, "M": 156600, "H": 158600}
+			},
+		"n28A": {
+			"5MHz": {"L28A": 152100, "M28A": 154600, "H28A": 157100},
+			"10MHz": {"L28A": 152600, "M28A": 154600,"H28A": 156600},
+			"15MHz": {"L28A": 153100, "M28A": 154600, "H28A": 156100},
+			"20MHz": {"L28A": 153600, "M28A": 154600,"H28A": 155600},
+			"30MHz": {"L28A": 154600, "M28A": 154600, "H28A": 154600}
+			},
+		"n28B": {
+			"5MHz": {"L28B": 158100, "M28B": 159100, "H28B": 160100},
+			"10MHz": {"L28B": 158600, "M28B": 159100, "H28B": 159600},
+			"15MHz": {"L28B": 159100, "M28B": 159100, "H28B": 159100}
+			},
+		"n30": {
+			"10MHz":{"M": 471000},"20MHz":{"M": 471000}
+			},
+		"n34": {
+			"10MHz": {"L": 403000, "M": 403500, "H": 404000}
+			},
+		"n38": {
+			"10MHz": {"L": 515000, "M": 519000, "H": 523000},
+			"15MHz": {"L": 515500, "M": 519000, "H": 522500},
+			"20MHz": {"L": 516000, "M": 519000, "H": 522000},
+			"25MHz": {"L": 516500, "M": 519000, "H": 521500},
+			"30MHz": {"L": 517000, "M": 519000, "H": 521000},
+			"40MHz": {"L": 518000, "M": 519000, "H": 520000}},
+		"n40": {
+			"10MHz": {"L": 461000, "M": 470000, "H": 479000},
+			"15MHz": {"L": 461500, "M": 470000, "H": 478500},
+			"20MHz": {"L": 462000, "M": 470000, "H": 478000},
+			"25MHz": {"L": 462500, "M": 470000, "H": 477500},
+			"30MHz": {"L": 463000, "M": 470000, "H": 477000},
+			"40MHz": {"L": 464000, "M": 470000, "H": 476000},
+			"50MHz": {"L": 465000, "M": 470000, "H": 475000},
+			"60MHz": {"L": 466000, "M": 470000, "H": 474000},
+			"80MHz": {"L": 468000, "M": 470000, "H": 472000},
+			"100MHz": {"M": 470000}
+			},
+        "n41": {
+            "10MHz": {"L": 500202, "M": 518598, "H": 537000},
+            "15MHz": {"L": 500700, "M": 518598, "H": 536496},
+            "20MHz": {"L": 501204, "M": 518598, "H": 535998},
+            "30MHz": {"L": 502200, "M": 518598, "H": 534996},
+            "40MHz": {"L": 503202, "M": 518598, "H": 534000},
+            "50MHz": {"L": 504204, "M": 518598, "H": 532998},
+            "60MHz": {"L": 505200, "M": 518598, "H": 531996},
+            "70MHz": {"L": 506202, "M": 518598, "H": 531000},
+            "80MHz": {"L": 507204, "M": 518598, "H": 529998},
+            "90MHz": {"L": 508200, "M": 518598, "H": 528996},
+            "100MHz": {"L": 509202, "M": 518598, "H": 528000}
+			},
+        "n48": {
+            "10MHz": {"L": 637000, "M": 641666, "H": 646332},
+            "15MHz": {"L": 637168, "M": 641666, "H": 646166},
+            "20MHz": {"L": 637334, "M": 641666, "H": 646000},
+            "30MHz": {"L": 637668, "M": 641666, "H": 645666},
+            "40MHz": {"L": 638000, "M": 641666, "H": 645332},
+            "50MHz": {"L": 638334, "M": 641666, "H": 645000},
+            "60MHz": {"L": 638668, "M": 641666, "H": 644666},
+            "70MHz": {"L": 639000, "M": 641666, "H": 644332},
+            "80MHz": {"L": 639334, "M": 641666, "H": 644000},
+            "90MHz": {"L": 639668, "M": 641666, "H": 643666},
+            "100MHz": {"L": 640000, "M": 641666, "H": 643332}
+			},
+        "n66": {
+            "5MHz": {"L": 422500, "M": 429000, "H": 435500},
+            "10MHz": {"L": 423000, "M": 429000, "H": 435000},
+            "15MHz": {"L": 423500, "M": 429000, "H": 434500},
+            "20MHz": {"L": 424000, "M": 429000, "H": 434000},
+            "25MHz": {"L": 424500, "M": 429000, "H": 433500},
+            "30MHz": {"L": 425000, "M": 429000, "H": 433000},
+            "40MHz": {"L": 426000, "M": 429000, "H": 432000},
+            "45MHz": {"L": 426500, "M": 429000, "H": 431500}
+			},
+        "n70": {
+            "5MHz": {"L": 399500, "M": 400500, "H": 401500},                
+            "10MHz": {"L": 400000, "M": 400500, "H": 401000},
+            "15MHz": {"L": 400500, "M": 400500, "H": 400500}, 
+			},
+        "n71": {
+            "10MHz": {"L": 124400, "M": 126900, "H": 129400},
+            "15MHz": {"L": 124900, "M": 126900, "H": 128900},
+            "20MHz": {"L": 125400, "M": 126900, "H": 128400}
+			},
+        "n74": {
+            "5MHz": {"L": 295500, "M": 299300, "H": 303100},
+            "10MHz": {"L": 296000, "M": 299300, "H": 302600},
+            "15MHz": {"L": 296500, "M": 299300, "H": 302100},
+            "20MHz": {"L": 297000, "M": 299300, "H": 301600}
+			},
+        "n75": {
+            "10MHz": {"L": 287400, "M": 294900, "H": 302400},
+            "15MHz": {"L": 287900, "M": 294900, "H": 301900},
+            "20MHz": {"L": 288400, "M": 294900, "H": 301400}
+			},
+        "n76": {
+            "5MHz": {"M": 285900}
+			},
+        "n77": {
+            "10MHz": {"L": 620334, "M": 650000, "H": 679666},
+            "15MHz": {"L": 620500, "M": 650000, "H": 679500},
+            "20MHz": {"L": 620668, "M": 650000, "H": 679332},
+            "25MHz": {"L": 620834, "M": 650000, "H": 679166},
+            "30MHz": {"L": 621000, "M": 650000, "H": 679000},
+            "40MHz": {"L": 621334, "M": 650000, "H": 678666},
+            "50MHz": {"L": 621668, "M": 650000, "H": 678332},
+            "60MHz": {"L": 622000, "M": 650000, "H": 678000},
+            "70MHz": {"L": 622334, "M": 650000, "H": 677666},
+            "80MHz": {"L": 622668, "M": 650000, "H": 677332},
+            "90MHz": {"L": 623000, "M": 650000, "H": 677000},
+            "100MHz": {"L": 623334, "M": 650000, "H": 676666}
+			},
+        "n78": {
+            "10MHz": {"L": 620334, "M": 636666, "H": 653000},
+            "15MHz": {"L": 620500, "M": 636666, "H": 652832},
+            "20MHz": {"L": 620668, "M": 636666, "H": 652666},
+            "25MHz": {"L": 620834, "M": 636666, "H": 652500},
+            "30MHz": {"L": 621000, "M": 636666, "H": 652332},
+            "40MHz": {"L": 621334, "M": 636666, "H": 652000},
+            "50MHz": {"L": 621668, "M": 636666, "H": 651666},
+            "60MHz": {"L": 622000, "M": 636666, "H": 651332},
+            "70MHz": {"L": 622334, "M": 636666, "H": 651000},
+            "80MHz": {"L": 622668, "M": 636666, "H": 650666},
+            "90MHz": {"L": 623000, "M": 636666, "H": 650332},
+            "100MHz": {"L": 623334, "M": 636666, "H": 650000}
+			},
+        "n79": {
+            "10MHz": {"L": 693667, "M": 713334, "H": 733000},
+            "40MHz": {"L": 694667, "M": 713334, "H": 732000},
+            "50MHz": {"L": 695001, "M": 713334, "H": 731667},
+            "60MHz": {"L": 695334, "M": 713334, "H": 731333},
+            "100MHz": {"L": 696667, "M": 713334, "H": 730000}
+			},
+        "n255": {
+            "5MHz": {"L": 305500, "M": 308400, "H": 311300},
+            "10MHz": {"L": 305020, "M": 308400, "H": 311780},
+            "15MHz": {"L": 306500, "M": 308400, "H": 310300},
+            "20MHz": {"L": 307000, "M": 308400, "H": 309800}
+			},
+        "n256": {
+            "5MHz": {"L": 434500, "M": 437000, "H": 439500},
+            "10MHz": {"L": 434020, "M": 437000, "H": 439980},
+            "15MHz": {"L": 435500, "M": 437000, "H": 438500},
+            "20MHz": {"L": 436000, "M": 437000, "H": 438000}}
+			},
+        "NR5G_MMW": {
+            "n257": {"50MHz":{"L":2054167,"M":2078347,"H":2103331},"100MHz":{"L":2054999,"M":2079165,"H":2103331},"200MHz":{"L":2054167,"M":2078347,"H":2100801}},
+            "n258": {"50MHz":{"L":2016667,"M":2043749,"H":2069999},"100MHz":{"L":2017499,"M":2043749,"H":2069999},"200MHz":{"L":2016667,"M":2043749,"H":2067499}},
+            "n260": {"50MHz":{"L":2229167,"M":2253355,"H":2278331},"100MHz":{"L":2229999,"M":2254165,"H":2278331},"200MHz":{"L":2229167,"M":2253355,"H":2275831}},
+            "n261": {"50MHz":{"L":2070833,"M":2077099,"H":2084165},"100MHz":{"L":2071667,"M":2077915,"H":2084165},"200MHz":{"L":2070833,"M":2077099,"H":2081675}}
+			}
+		};
+
+    function onRatChange() {
+        const rat = document.getElementById('ratSelect').value;
+        const bSelect = document.getElementById('bandSelect');
+        const bwDiv = document.getElementById('bwContainer');
+        bSelect.innerHTML = '<option value="">-- Select Band --</option>';
+        bSelect.disabled = !rat;
+        bwDiv.classList.add('hidden');
+        document.getElementById('resultArea').innerHTML = '';
+        if (!rat) return;
+
+        let bands = Object.keys(RF_CHANNELS_MAP[rat] || {});
+        if (rat === "GSM") {
+            const order = ["G850", "G900", "G1800", "G1900"];
+            bands.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+        } else {
+            bands.sort((a, b) => {
+                let numA = parseInt(a.replace(/\D/g, ''));
+                let numB = parseInt(b.replace(/\D/g, ''));
+                return numA - numB;
+            });
+        }
+        bands.forEach(b => { let opt = document.createElement('option'); opt.value = b; opt.text = b; bSelect.appendChild(opt); });
+    }
+
+    function onBandChange() {
+        const rat = document.getElementById('ratSelect').value;
+        const band = document.getElementById('bandSelect').value;
+        const bwDiv = document.getElementById('bwContainer');
+        const bwSelect = document.getElementById('bwSelect');
+        if (!band) return;
+
+        if (rat.includes('NR')) {
+            bwDiv.classList.remove('hidden');
+            bwSelect.innerHTML = '<option value="">-- Select BW --</option>';
+            const bwList = Object.keys(RF_CHANNELS_MAP[rat][band]);
+            bwList.sort((a, b) => parseInt(a) - parseInt(b));
+            bwList.forEach(bw => { let opt = document.createElement('option'); opt.value = bw; opt.text = bw; bwSelect.appendChild(opt); });
+        } else {
+            bwDiv.classList.add('hidden');
+            displayResult(RF_CHANNELS_MAP[rat][band]);
+        }
+    }
+
+    function displayResult(fixedData = null) {
+        const rat = document.getElementById('ratSelect').value;
+        const bStr = document.getElementById('bandSelect').value;
+        const bwKey = document.getElementById('bwSelect').value;
+        let data = fixedData || RF_CHANNELS_MAP[rat][bStr][bwKey];
+        if (!data) return;
+
+        let html = `<table class="rtc-table"><thead><tr><th>Range</th><th>DL CH</th><th>DL Freq</th><th>UL CH</th><th>UL Freq</th></tr></thead><tbody>`;
+        ['L', 'M', 'H'].forEach(p => {
+            let dlCh = data[p] || '-';
+            let dlF = '-', ulCh = '-', ulF = '-';
+            if (dlCh !== '-') {
+                if (rat.includes('NR')) {
+                    dlF = nrArfcnToFreq(dlCh).toFixed(3);
+                    const info = TECH_SPEC[rat][bStr] || {s:0};
+                    ulF = (parseFloat(dlF) + info.s).toFixed(3);
+                    ulCh = nrFreqToArfcn(parseFloat(ulF));
+                } else if (rat === 'LTE') {
+                    const info = TECH_SPEC.LTE[bStr];
+                    if (info) {
+                        dlF = (info.dl + 0.1 * (dlCh - info.ndl)).toFixed(1);
+                        ulCh = dlCh + (info.nul - info.ndl);
+                        ulF = (parseFloat(dlF) + info.s).toFixed(1);
+                    }
+                } else if (rat === 'WCDMA') {
+                    const info = TECH_SPEC.WCDMA[bStr];
+                    if (info) {
+                        dlF = (info.dl + 0.2 * (dlCh - info.ndl)).toFixed(1);
+                        ulCh = dlCh - (info.ndl - info.nul);
+                        ulF = (info.ul + 0.2 * (ulCh - info.nul)).toFixed(1);
+                    }
+                } else if (rat === 'GSM') {
+                    const info = TECH_SPEC.GSM[bStr];
+                    const m = (dlCh >= 975) ? (dlCh - 1024) : dlCh;
+                    dlF = (info.dl + 0.2 * (m - info.off)).toFixed(1);
+                    ulF = (info.ul + 0.2 * (m - info.off)).toFixed(1);
+                    ulCh = dlCh;
+                }
+            }
+            html += `<tr><td><b>${p} Channel</b></td><td><span class="val-ch">${dlCh}</span></td><td><span class="val-freq-dl">${dlF} MHz</span></td><td><span class="val-ch">${ulCh}</span></td><td><span class="val-freq-ul">${ulF} MHz</span></td></tr>`;
+        });
+        document.getElementById('resultArea').innerHTML = html + `</tbody></table>`;
+    }
+</script>
+</body>
+</html>
