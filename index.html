@@ -3,20 +3,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WWAN RTC Tool v2.2</title>
+    <title>WWAN RTC Tool v2.3</title>
     <style>
         :root {
             --primary-lte: #2563eb; --primary-nr: #7c3aed; --primary-mmw: #db2777;
             --bg: #f8fafc; --card: #ffffff; --border: #e2e8f0; --text: #1e293b;
         }
-        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 20px; display: flex; justify-content: center; }
-        .container { background: var(--card); width: 100%; max-width: 950px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); border: 1px solid var(--border); overflow: hidden; }
+        body { 
+			font-family: system-ui, -apple-system, sans-serif; 
+			background: var(--bg); 
+			color: var(--text); 
+			padding: 10px; 
+			display: flex; 
+			justify-content: center; 
+			align-items: flex-start; /* 確保長頁面從頂部開始 */
+			min-height: 100vh;
+			}
+        .container { 
+			background: var(--card); 
+			width: 95%; 
+			max-width: 950px; 
+			border-radius: 12px; 
+			box-shadow: 0 4px 20px rgba(0,0,0,0.08); 
+			border: 1px solid var(--border); 
+			overflow: hidden; 
+			margin: 10 auto; /*置中 */
+			}
         .header { background: linear-gradient(135deg, var(--primary-lte), var(--primary-nr)); color: white; padding: 25px; text-align: center; }
         .content { padding: 25px; }
         .form-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 25px; }
         label { display: block; margin-bottom: 8px; font-weight: 600; font-size: 0.85rem; color: #64748b; }
-        select { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; background: white; cursor: pointer; }
-        .rtc-table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; }
+        select { width: 100%; padding: 12px; bord	er: 1px solid var(--border); border-radius: 8px; font-size: 1rem; background: white; cursor: pointer; }
+		/* 讓表單欄位在手機上由橫向改為縱向排列 */
+		@media (max-width: 600px) {
+			.form-row {
+				grid-template-columns: 1fr !important; /* 強制切換為單欄 */
+				gap: 10px;
+				}
+    
+			.header h2 {
+				font-size: 1.2rem; /* 縮小標題字體 */
+			}
+		}
+
+		/* 解決表格截斷的最關鍵設定：包裝容器 */
+		#resultArea {
+			width: 100%;
+			overflow-x: auto; /* 當表格太寬時，允許左右滑動而非截斷 */
+			-webkit-overflow-scrolling: touch; /* 讓手機滑動更順暢 */
+		}
+		
+        .rtc-table { 
+			min-width: 600px; /* 確保表格內容不會因為縮小而擠壓變形 */
+			width: 100%; 
+			border-collapse: collapse; 
+			margin-top: 15px; 
+			background: white; 
+			}
         .rtc-table th { background: #f1f5f9; text-align: left; padding: 12px; border-bottom: 2px solid var(--border); font-size: 0.85rem; color: #475569; }
         .rtc-table td { padding: 14px 12px; border-bottom: 1px solid var(--border); font-size: 1rem; }
         .val-ch { font-weight: bold; color: #334155; font-family: 'Courier New', monospace; }
@@ -29,7 +72,7 @@
 <div class="container" id="mainApp">
     <div class="header">
         <h2 style="margin:0">WWAN Reference Test Channel</h2>
-        <p style="margin:5px 0 0; font-size:0.9rem; opacity:0.95">Version 2.2 | joshchengkj@google.com</p>
+        <p style="margin:5px 0 0; font-size:0.9rem; opacity:0.95">Version 2.3 | joshchengkj@google.com</p>
     </div>
     <div class="content">
         <div class="form-row">
